@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { ChevronRight, ChevronLeft, Heart, Sparkles, Loader2, Check, Minus, Plus, Wand2 } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Heart, Sparkles, Loader2, Check, Wand2 } from 'lucide-react'
 import { db, monthKey, type AiDeck } from '../db'
 import { useStore } from '../store'
 import { CATALOG, TOPIC_BY_ID } from '../content/catalog'
@@ -8,6 +8,7 @@ import { getModule, topicTitle } from '../content/topics'
 import { topicProgress, type TopicProgress } from '../stats'
 import { maturity } from '../srs'
 import { IntroCard } from './Session'
+import { getLessons, lessonStatus, type Lesson } from '../content/lessons'
 import { MONTHS, plural } from './Today'
 import { makeDeck, suggestTopics, AiError, type TopicIdea } from '../ai'
 
@@ -85,7 +86,7 @@ function TopicRow({ id, title, sub, onClick, icon }: { id: string; title: string
 
 // ——— Лист темы ———
 
-export function TopicSheet({ id, onClose }: { id: string; onClose: () => void }) {
+export function TopicSheet({ id, onClose, onLesson }: { id: string; onClose: () => void; onLesson: (lesson: Lesson, reread: boolean) => void }) {
   const { settings, update, decks } = useStore()
   const mod = getModule(id, decks)
   const info = TOPIC_BY_ID.get(id)
@@ -130,7 +131,9 @@ export function TopicSheet({ id, onClose }: { id: string; onClose: () => void })
   const order = { new: 0, learning: 1, young: 2, mature: 3 }
   for (const c of cards) { const m = maturity(c); const prev = byItem.get(c.itemId); if (!prev || order[m] < order[prev]) byItem.set(c.itemId, m) }
   const chipText = { new: 'новое', learning: 'учится', young: 'знакомо', mature: 'надолго' }
-  const perDay = settings.newPerDay[id] ?? 2
+  const introduced = new Set(cards.map((c) => c.itemId))
+  const lessons = getLessons(id, decks)
+  const next = lessons.find((l) => lessonStatus(l, introduced) !== 'done')
 
   return (
     <div className="sheet" role="dialog" aria-label={title}>
@@ -166,16 +169,6 @@ export function TopicSheet({ id, onClose }: { id: string; onClose: () => void })
                 {!inMonth && month.length >= 3 && <span className="row-sub">Заменит тему «{topicTitle(month[0], decks)}»</span>}</div>
             </button>
           ) : null}
-          {mod && (
-            <div className="row">
-              <div className="row-main"><span className="row-title">Новых в день</span><span className="row-sub">При 30-минутном занятии — почти вдвое больше</span></div>
-              <div className="order-move">
-                <button aria-label="Меньше" disabled={perDay <= 1} onClick={() => update((s) => ({ newPerDay: { ...s.newPerDay, [id]: Math.max(1, perDay - 1) } }))}><Minus size={16} /></button>
-                <span className="num" style={{ minWidth: 28, textAlign: 'center', alignSelf: 'center', fontWeight: 600 }}>{perDay}</span>
-                <button aria-label="Больше" disabled={perDay >= 10} onClick={() => update((s) => ({ newPerDay: { ...s.newPerDay, [id]: Math.min(10, perDay + 1) } }))}><Plus size={16} /></button>
-              </div>
-            </div>
-          )}
         </div>
 
         {!mod && (
@@ -192,6 +185,26 @@ export function TopicSheet({ id, onClose }: { id: string; onClose: () => void })
           </div>
         )}
 
+        {mod && lessons.length > 0 && (
+          <section className="section">
+            <h2>Уроки</h2>
+            <p className="section-sub">Сначала рассказ, потом вопросы. Пройденные уроки можно перечитать.</p>
+            <div className="group">
+              {lessons.map((l, i) => {
+                const st = lessonStatus(l, introduced)
+                const isNext = l === next
+                return (
+                  <button key={l.id} className="row" onClick={() => onLesson(l, st === 'done')}>
+                    <span className={`lesson-num${st === 'done' ? ' is-done' : isNext ? ' is-next' : ''}`}>{st === 'done' ? <Check size={15} /> : i + 1}</span>
+                    <div className="row-main"><span className="row-title">{l.title}</span><span className="row-sub">{l.teaser}</span></div>
+                    <ChevronRight size={18} className="chev" />
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
         {mod && (
           <section className="section">
             <h2>{plural(mod.itemIds().length, 'Карточка', 'Карточки', 'Карточки')}</h2>
@@ -200,7 +213,7 @@ export function TopicSheet({ id, onClose }: { id: string; onClose: () => void })
                 const m = byItem.get(iid) ?? 'new'
                 return (
                   <button key={iid} className="row" onClick={() => setItem(iid)}>
-                    <div className="row-main"><span className="row-title">{mod.itemTitle(iid)}</span><span className="row-sub">{byItem.has(iid) ? mod.itemSub(iid) : 'Ещё не изучено'}</span></div>
+                    <div className="row-main"><span className="row-title">{mod.itemTitle(iid)}</span><span className="row-sub">{byItem.has(iid) ? mod.itemSub(iid) : 'Появится после урока'}</span></div>
                     <span className={`chip chip-${m}`}>{chipText[m]}</span>
                   </button>
                 )

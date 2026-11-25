@@ -8,7 +8,7 @@ import { SettingsScreen } from './screens/Settings'
 import { Onboarding } from './screens/Onboarding'
 import { Session } from './screens/Session'
 import { Practice, PracticeRun, type PracticeMode } from './screens/Practice'
-import type { Plan } from './session'
+import { lessonPlan, type Plan } from './session'
 
 type Tab = 'today' | 'topics' | 'practice' | 'progress' | 'settings'
 
@@ -21,7 +21,7 @@ const TABS: { id: Tab; label: string; Icon: typeof House }[] = [
 ]
 
 function Shell() {
-  const { ready, settings } = useStore()
+  const { ready, settings, decks } = useStore()
   const [tab, setTab] = useState<Tab>('today')
   const [session, setSession] = useState<{ plan: Plan; extra: boolean } | null>(null)
   const [topic, setTopic] = useState<string | null>(null)
@@ -51,7 +51,7 @@ function Shell() {
         </div>
       </nav>
 
-      {topic && <TopicSheet id={topic} onClose={() => { setTopic(null); setRefresh((n) => n + 1) }} />}
+      {topic && <TopicSheet id={topic} onClose={() => { setTopic(null); setRefresh((n) => n + 1) }} onLesson={(l, reread) => setSession({ plan: lessonPlan(l, decks, reread), extra: true })} />}
       {picker && <MonthPicker onClose={() => { setPicker(false); setRefresh((n) => n + 1) }} />}
       {practice && <PracticeRun mode={practice} onClose={() => setPractice(null)} />}
       {session && <Session plan={session.plan} extra={session.extra} onDone={() => { setSession(null); setRefresh((n) => n + 1) }} />}

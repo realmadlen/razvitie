@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, Check, Lightbulb, Sparkles, ArrowUp, ArrowDown, MapPin, Brain, Compass, Heart, Loader2, PartyPopper, Pencil } from 'lucide-react'
+import { X, Check, Lightbulb, Sparkles, ArrowUp, ArrowDown, MapPin, Brain, Compass, Heart, Loader2, PartyPopper, Pencil, BookOpen, ChevronLeft } from 'lucide-react'
 import { db, bumpDay, type CardRow } from '../db'
 import { useStore } from '../store'
-import { getModule, checkTyped, type Question, type OrderTask, type Intro } from '../content/topics'
+import { getModule, checkTyped, topicTitle, type Question, type OrderTask, type Intro } from '../content/topics'
+import { findLesson } from '../content/lessons'
 import { TOPIC_BY_ID, type Discovery } from '../content/catalog'
 import { review, gradeFrom, newCardRow, memoryIndex } from '../srs'
 import type { Plan, Step } from '../session'
@@ -82,7 +83,7 @@ export function Session({ plan, extra = false, onDone }: Props) {
       </div>
       {step && (
         <StepView key={`${idx}-${step.t}`} step={step} phase={phase} onAnswered={onAnswered} onNext={next}
-          onNewItem={() => setStats((s) => ({ ...s, newItems: s.newItems + 1 }))} />
+          onNewItem={(n: number) => setStats((s) => ({ ...s, newItems: s.newItems + n }))} />
       )}
     </div>
   )
@@ -90,11 +91,12 @@ export function Session({ plan, extra = false, onDone }: Props) {
 
 // ——— Шаги ———
 
-interface StepProps { step: Step; phase: Phase; onAnswered: (r: { correct: boolean; cardId?: string; again?: boolean }) => void; onNext: () => void; onNewItem: () => void }
+interface StepProps { step: Step; phase: Phase; onAnswered: (r: { correct: boolean; cardId?: string; again?: boolean }) => void; onNext: () => void; onNewItem: (n: number) => void }
 
 function StepView({ step, phase, onAnswered, onNext, onNewItem }: StepProps) {
   switch (step.t) {
-    case 'intro': return <IntroStep topicId={step.topicId} itemId={step.itemId} onNext={onNext} onNewItem={onNewItem} />
+    case 'lesson': return <LessonStep topicId={step.topicId} lessonId={step.lessonId} reread={step.reread} onNext={onNext} onNewItems={onNewItem} />
+    case 'quiz-start': return <QuizStart title={step.title} onNext={onNext} />
     case 'review': return <ReviewStep cardId={step.cardId} phase={phase} onAnswered={onAnswered} onNext={onNext} />
     case 'order': return <OrderStep task={step.task} phase={phase} onAnswered={onAnswered} onNext={onNext} />
     case 'discovery': return <DiscoveryStep d={step.d} onNext={onNext} />
@@ -113,37 +115,123 @@ function NextButton({ onNext, label = 'Далее' }: { onNext: () => void; labe
 
 // ——— Знакомство с новым ———
 
-function useMnemonic(topicId: string, itemId: string, fallback?: string) {
-  const { settings } = useStore()
-  return settings.mnemonics[`${topicId}|${itemId}`] ?? fallback
+// ——— Урок ———
+
+/** Текст урока: абзацы через пустую строку, **жирное** — главное */
+export function RichText({ text }: { text: string }) {
+  return (
+    <div className="rich">
+      {text.split(/\n\s*\n/).map((para, i) => (
+        <p key={i}>{para.split(/(\*\*[^*]+\*\*)/g).map((part, j) => part.startsWith('**') && part.endsWith('**')
+          ? <b key={j}>{part.slice(2, -2)}</b>
+          : part.split('\n').map((line, k) => <span key={`${j}-${k}`}>{k > 0 && <br />}{line}</span>))}</p>
+      ))}
+    </div>
+  )
 }
 
-function IntroStep({ topicId, itemId, onNext, onNewItem }: { topicId: string; itemId: string; onNext: () => void; onNewItem: () => void }) {
+function LessonFact({ intro }: { intro: Intro }) {
+  const short = intro.facts.filter((f) => f.value.length <= 40)
+  if (!intro.mapId && !short.length) return null
+  return (
+    <div className="lesson-fact">
+      {intro.mapId && <WorldMap focusId={intro.mapId} highlightId={intro.mapId} span={48} height={190} label={`Карта: ${intro.title}`} />}
+      {short.length > 0 && <dl className="facts">{short.map((f) => <div key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></div>)}</dl>}
+    </div>
+  )
+}
+
+export function LessonStep({ topicId, lessonId, reread, onNext, onNewItems }: { topicId: string; lessonId: string; reread?: boolean; onNext: () => void; onNewItems?: (n: number) => void }) {
   const { decks } = useStore()
+  const lesson = useMemo(() => findLesson(lessonId, topicId, decks), [lessonId, topicId, decks])
   const mod = getModule(topicId, decks)
-  const custom = useMnemonic(topicId, itemId)
-  const intro = useMemo(() => mod?.intro(itemId, custom), [mod, itemId, custom])
-  const created = useRef(false)
+  const [page, setPage] = useState(0)
+  const [answers, setAnswers] = useState<Record<number, number>>({})
+  const [saving, setSaving] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }) }, [page])
 
-  useEffect(() => {
-    if (!mod || created.current) return
-    created.current = true
-    ;(async () => {
-      const rows = mod.kinds(itemId).map((k) => newCardRow(topicId, itemId, k))
-      const existing = await db.cards.bulkGet(rows.map((r) => r.id))
-      const fresh = rows.filter((_, i) => !existing[i])
-      if (fresh.length) { await db.cards.bulkPut(fresh); await bumpDay({ newItems: 1 }); onNewItem() }
-    })()
-  }, [mod, topicId, itemId, onNewItem])
+  if (!lesson || !mod) return <Missing onNext={onNext} />
+  const total = lesson.pages.length + 1 // + итог
+  const isSummary = page >= lesson.pages.length
+  const pg = lesson.pages[page]
+  const chosen = answers[page]
+  const needAnswer = !isSummary && !!pg.check && chosen === undefined
 
-  if (!mod || !intro) return <Missing onNext={onNext} />
+  const finish = async () => {
+    if (reread) return onNext()
+    setSaving(true)
+    // Урок прочитан — заводим карточки для повторения
+    const rows = lesson.itemIds.flatMap((itemId) => mod.kinds(itemId).map((k) => newCardRow(topicId, itemId, k)))
+    const existing = await db.cards.bulkGet(rows.map((r) => r.id))
+    const fresh = rows.filter((_, i) => !existing[i])
+    const freshItems = new Set(fresh.map((r) => r.itemId)).size
+    if (fresh.length) { await db.cards.bulkPut(fresh); await bumpDay({ newItems: freshItems }); onNewItems?.(freshItems) }
+    onNext()
+  }
+
+  return (
+    <>
+      <div className="session-body fade-in lesson" ref={bodyRef} key={page}>
+        <div className="lesson-meta">
+          <span className="new-badge"><BookOpen size={14} /> Урок · {TOPIC_BY_ID.get(topicId)?.title ?? topicTitle(topicId, decks)}</span>
+          <span className="lesson-count num">{page + 1} / {total}</span>
+        </div>
+        {page === 0 && <header className="lesson-head"><h1>{lesson.title}</h1><p>{lesson.teaser}</p></header>}
+        {isSummary ? (
+          <>
+            <h2 className="lesson-h">Главное из урока</h2>
+            <div className="group">
+              {lesson.itemIds.map((id) => (
+                <div key={id} className="row"><div className="row-main"><span className="row-title">{mod.itemTitle(id)}</span><span className="row-sub">{mod.itemSub(id)}</span></div></div>
+              ))}
+            </div>
+            <p className="note">{reread ? 'Можно вернуться к уроку в любой момент из раздела «Темы».' : 'Сейчас проверим, что запомнилось. Ошибаться можно — так память закрепляется лучше.'}</p>
+          </>
+        ) : (
+          <>
+            {pg.title && <h2 className="lesson-h">{pg.title}</h2>}
+            {pg.itemId && <LessonFact intro={mod.intro(pg.itemId)} />}
+            <RichText text={pg.text} />
+            {pg.check && (
+              <div className="lesson-check">
+                <span className="mnemonic-title"><Brain size={16} /> Вопрос на понимание</span>
+                <p className="lesson-check-q">{pg.check.q}</p>
+                <div className="options">
+                  {pg.check.options.map((o, i) => {
+                    const cls = chosen === undefined ? '' : i === pg.check!.correct ? 'is-correct' : i === chosen ? 'is-wrong' : 'is-dim'
+                    return <button key={o} className={`option ${cls}`} disabled={chosen !== undefined} onClick={() => setAnswers((a) => ({ ...a, [page]: i }))}>{o}{chosen !== undefined && i === pg.check!.correct && <Check size={20} />}</button>
+                  })}
+                </div>
+                {chosen !== undefined && pg.check.why && <p className="note">{chosen === pg.check.correct ? 'Верно. ' : ''}{pg.check.why}</p>}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <Foot>
+        <div className="lesson-nav">
+          {page > 0 && <button className="btn btn-quiet" onClick={() => setPage(page - 1)} aria-label="Назад"><ChevronLeft size={20} /></button>}
+          {isSummary
+            ? <button className="btn btn-primary btn-block" disabled={saving} onClick={finish}>{reread ? 'Готово' : 'Проверить себя'}</button>
+            : <button className="btn btn-primary btn-block" disabled={needAnswer} onClick={() => setPage(page + 1)}>{needAnswer ? 'Выберите ответ' : 'Дальше'}</button>}
+        </div>
+      </Foot>
+    </>
+  )
+}
+
+function QuizStart({ title, onNext }: { title: string; onNext: () => void }) {
   return (
     <>
       <div className="session-body fade-in">
-        <span className="new-badge"><Sparkles size={14} /> Новое · {TOPIC_BY_ID.get(topicId)?.title ?? ''}</span>
-        <IntroCard intro={intro} />
+        <div className="quiz-start">
+          <span className="summary-icon"><Check size={30} /></span>
+          <h1>Урок пройден</h1>
+          <p className="note">«{title}» — теперь несколько вопросов по нему. Дальше эти факты будут возвращаться на повторение ровно тогда, когда начнут забываться.</p>
+        </div>
       </div>
-      <Foot><NextButton onNext={onNext} label="Понятно, проверить" /></Foot>
+      <Foot><NextButton onNext={onNext} label="Начать проверку" /></Foot>
     </>
   )
 }
@@ -214,7 +302,10 @@ export function MnemonicBox({ topicId, itemId, text, fact }: { topicId: string; 
 function ReviewStep({ cardId, phase, onAnswered, onNext }: { cardId: string; phase: Phase; onAnswered: StepProps['onAnswered']; onNext: () => void }) {
   const { decks, settings } = useStore()
   const [card, setCard] = useState<CardRow | null | undefined>(undefined)
+  const [known, setKnown] = useState<Set<string> | null>(null)
   useEffect(() => {
+    const topicId = cardId.split('|')[0]
+    db.cards.where('topicId').equals(topicId).toArray().then((rows) => setKnown(new Set(rows.map((r) => r.itemId))))
     // Карточка нового элемента может ещё не успеть записаться — тогда создаём её здесь
     db.cards.get(cardId).then(async (c) => {
       if (c) return setCard(c)
@@ -228,13 +319,13 @@ function ReviewStep({ cardId, phase, onAnswered, onNext }: { cardId: string; pha
   }, [cardId])
   const mod = card ? getModule(card.topicId, decks) : null
   const q = useMemo(() => {
-    if (!card || !mod) return null
-    try { return mod.question(card, settings.mnemonics[`${card.topicId}|${card.itemId}`]) } catch { return null }
+    if (!card || !mod || !known) return null
+    try { return mod.question(card, settings.mnemonics[`${card.topicId}|${card.itemId}`], known) } catch { return null }
     // вопрос создаётся один раз на шаг
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card?.id, mod])
+  }, [card?.id, mod, known])
 
-  if (card === undefined) return <div className="session-body" />
+  if (card === undefined || (card && !known)) return <div className="session-body" />
   if (!card || !q) return <Missing onNext={onNext} />
 
   const submit = async (correct: boolean, usedHint: boolean, ms: number, typed: boolean) => {

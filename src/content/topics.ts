@@ -34,7 +34,8 @@ export interface TopicModule {
   itemTitle(itemId: string): string
   itemSub(itemId: string): string
   intro(itemId: string, mnemonic?: string): Intro
-  question(card: CardRow, mnemonic?: string): Question
+  /** known — элементы, которые уже изучены: неверные варианты берём только из них */
+  question(card: CardRow, mnemonic?: string, known?: Set<string>): Question
   order?(introduced: string[]): OrderTask | null
 }
 
@@ -71,13 +72,15 @@ const countries: TopicModule = {
       body: c.note, mnemonic: mn ?? c.mnemonic,
     }
   },
-  question(card, mn) {
+  question(card, mn, known) {
     const c = COUNTRY_BY_ID.get(card.itemId)!
     const mnemonic = mn ?? c.mnemonic
     const explain = `${c.name} — столица ${c.capital}. № ${c.rank} по площади, ${formatArea(c.area)}.`
     const base = { topicId: 'countries', itemId: c.id, mnemonic, explain, mapId: c.id, label: 'Страны и столицы' }
+    // Варианты — из уже изученных стран; если их мало, добираем соседями по региону
+    const learned = COUNTRIES.filter((x) => known?.has(x.id))
     const sameRegion = COUNTRIES.filter((x) => x.region === c.region)
-    const pool = sameRegion.length >= 6 ? sameRegion : COUNTRIES
+    const pool = learned.length >= 4 ? learned : [...new Set([...learned, ...sameRegion, ...COUNTRIES])].slice(0, 8)
     if (card.kind === 'map') return { ...base, type: 'map', prompt: `Где находится ${c.name}?`, targetId: c.id }
     if (card.kind === 'reverse') {
       const ch = choices(c, pool, 4, (x) => x.id)
@@ -141,9 +144,12 @@ const biases: TopicModule = {
     const b = BIAS_BY_ID.get(id)!
     return { topicId: 'biases', itemId: id, title: b.name, facts: [{ label: 'Пример', value: b.example }, { label: 'Как себя проверить', value: b.tip }], body: b.definition, mnemonic: mn ?? b.mnemonic }
   },
-  question(card, mn) {
+  question(card, mn, known) {
     const b = BIAS_BY_ID.get(card.itemId)!
-    const ch = choices(b, BIASES, 4, (x) => x.id)
+    // Только среди изученных искажений — незнакомые названия в вариантах сбивают
+    const learned = BIASES.filter((x) => known?.has(x.id))
+    const pool = learned.length >= 2 ? learned : BIASES
+    const ch = choices(b, pool, Math.min(4, pool.length), (x) => x.id)
     const base = { topicId: 'biases', itemId: b.id, mnemonic: mn ?? b.mnemonic, explain: `${b.name}: ${b.definition.charAt(0).toLowerCase()}${b.definition.slice(1)}`, label: 'Когнитивные искажения' }
     const prompt = card.kind === 'def' ? b.definition : `Какое искажение здесь работает? ${b.example}`
     return { ...base, type: 'choice', prompt, options: ch.options.map((x) => x.name), correct: ch.correct }

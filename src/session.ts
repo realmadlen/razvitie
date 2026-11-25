@@ -1,23 +1,28 @@
 // Сборка ежедневного занятия: повторение → новое → упорядочивание → открытие дня.
 import { db, monthKey, type CardRow, type Settings, type AiDeck } from './db'
 import { getModule, type OrderTask } from './content/topics'
+import { nextLesson, type Lesson } from './content/lessons'
 import { DISCOVERIES, type Discovery } from './content/catalog'
 import { retrievability } from './srs'
 
 export type Step =
   | { t: 'review'; cardId: string; isNew?: boolean }
-  | { t: 'intro'; topicId: string; itemId: string }
+  | { t: 'lesson'; topicId: string; lessonId: string; reread?: boolean }
+  | { t: 'quiz-start'; title: string }
   | { t: 'order'; task: OrderTask }
   | { t: 'discovery'; d: Discovery }
+
+export interface PlannedLesson { topicId: string; lessonId: string; title: string }
 
 export interface Plan {
   steps: Step[]
   reviewCount: number
   newCount: number
+  lessons: PlannedLesson[]
   estMinutes: number
 }
 
-const SEC = { review: 11, intro: 25, order: 35, discovery: 20 }
+const SEC = { review: 11, page: 35, quiz: 12, order: 35, discovery: 20 }
 
 const shuffle = <T,>(xs: T[]): T[] => [...xs].sort(() => Math.random() - 0.5)
 
@@ -48,54 +53,37 @@ export async function buildPlan(s: Settings, decks: AiDeck[], opts: { minutes?: 
   const reviewCap = Math.max(5, Math.floor((budget * 0.55) / SEC.review))
   const reviews = due.slice(0, reviewCap)
   used += reviews.length * SEC.review
+  const overloaded = due.length > reviewCap
 
-  // Новое — только из тем текущего месяца
+  // Новое — уроками: сначала рассказ, потом проверка по нему. Темы чередуем по дням.
   const topics = monthTopics(s)
   const introduced = await introducedByTopic()
-  const scale = minutes >= 30 ? 1.75 : opts.extra ? 0.5 : 1
-  const overloaded = due.length > reviewCap
-  type NewBlock = { topicId: string; itemId: string; kinds: string[] }
-  const newBlocks: NewBlock[] = []
-  for (const topicId of topics) {
-    const mod = getModule(topicId, decks)
-    if (!mod) continue
-    const have = introduced.get(topicId) ?? new Set()
-    let n = Math.round((s.newPerDay[topicId] ?? 2) * scale)
-    if (overloaded) n = Math.ceil(n / 2)
-    const fresh = mod.itemIds().filter((id) => !have.has(id)).slice(0, Math.max(opts.extra ? 1 : 0, n))
-    for (const itemId of fresh) newBlocks.push({ topicId, itemId, kinds: mod.kinds(itemId) })
+  const dayNo = Math.floor(Date.now() / 86400000)
+  const rotated = topics.map((_, i) => topics[(i + dayNo) % topics.length])
+  const lessons: Lesson[] = []
+  for (const topicId of rotated) {
+    const l = nextLesson(topicId, decks, introduced.get(topicId) ?? new Set())
+    if (!l) continue
+    const cost = lessonCost(l)
+    const fits = used + cost <= budget * 1.15
+    if (fits || (!lessons.length && !overloaded && !opts.extra)) { lessons.push(l); used += cost }
   }
-  // не выходить за бюджет
-  while (newBlocks.length && used + newBlocks.reduce((a, b) => a + SEC.intro + b.kinds.length * SEC.review, 0) > budget * 1.1) newBlocks.pop()
 
-  // Чередуем: порция повторений, затем новый элемент с проверкой сразу и остальными видами позже
-  const deferred: Step[] = []
   const revSteps: Step[] = reviews.map((r) => ({ t: 'review', cardId: r.id }))
-  const chunk = Math.max(2, Math.ceil(revSteps.length / (newBlocks.length + 1)))
-  const mixed: Step[] = []
-  let ri = 0
-  const blocks = shuffle(newBlocks)
-  for (const b of blocks) {
-    mixed.push(...revSteps.slice(ri, ri + chunk)); ri += chunk
-    mixed.push({ t: 'intro', topicId: b.topicId, itemId: b.itemId })
-    const [first, ...rest] = b.kinds
-    mixed.push({ t: 'review', cardId: `${b.topicId}|${b.itemId}|${first}`, isNew: true })
-    for (const k of rest) deferred.push({ t: 'review', cardId: `${b.topicId}|${b.itemId}|${k}`, isNew: true })
-  }
-  mixed.push(...revSteps.slice(ri))
-  // отложенные проверки разбрасываем по второй половине
-  for (const d of shuffle(deferred)) {
-    const lo = Math.floor(mixed.length / 2)
-    mixed.splice(lo + Math.floor(Math.random() * (mixed.length - lo + 1)), 0, d)
-  }
-  steps.push(...mixed)
-  used += newBlocks.reduce((a, b) => a + SEC.intro + b.kinds.length * SEC.review, 0)
+  // Повторения — до уроков (разогрев памяти), часть оставляем между уроками
+  const head = lessons.length > 1 ? Math.ceil(revSteps.length * 0.6) : revSteps.length
+  steps.push(...revSteps.slice(0, head))
+  lessons.forEach((l, i) => {
+    steps.push(...lessonSteps(l, decks))
+    if (i === 0) steps.push(...revSteps.slice(head))
+  })
+  if (!lessons.length) steps.push(...revSteps.slice(head))
 
   // Упорядочивание — одна задача по теме, где уже есть что сравнивать
   if (!opts.extra) {
     for (const topicId of shuffle(topics).slice(0, 1)) {
       const mod = getModule(topicId, decks)
-      const have = [...(introduced.get(topicId) ?? []), ...newBlocks.filter((b) => b.topicId === topicId).map((b) => b.itemId)]
+      const have = [...(introduced.get(topicId) ?? []), ...lessons.filter((l) => l.topicId === topicId).flatMap((l) => l.itemIds)]
       const task = mod?.order?.(have)
       if (task) { steps.push({ t: 'order', task }); used += SEC.order }
     }
@@ -103,11 +91,36 @@ export async function buildPlan(s: Settings, decks: AiDeck[], opts: { minutes?: 
     if (d) { steps.push({ t: 'discovery', d }); used += SEC.discovery }
   }
 
-  return { steps, reviewCount: reviews.length, newCount: newBlocks.length, estMinutes: Math.max(1, Math.round(used / 60)) }
+  const newCount = lessons.reduce((a, l) => a + l.itemIds.filter((id) => !introduced.get(l.topicId)?.has(id)).length, 0)
+  return { steps, reviewCount: reviews.length, newCount, lessons: lessons.map((l) => ({ topicId: l.topicId, lessonId: l.id, title: l.title })), estMinutes: Math.max(1, Math.round(used / 60)) }
 }
 
 export function pickDiscovery(s: Settings, topics: string[]): Discovery | null {
   const pool = DISCOVERIES.filter((d) => !topics.includes(d.topicId) && !s.seenDiscoveries.includes(d.id))
   const list = pool.length ? pool : DISCOVERIES.filter((d) => !topics.includes(d.topicId))
   return list.length ? list[Math.floor(Math.random() * list.length)] : null
+}
+
+function lessonCost(l: Lesson) {
+  return l.pages.length * SEC.page + l.itemIds.length * SEC.quiz + 30
+}
+
+/** Урок и сразу проверка по нему: по одному вопросу на каждый новый элемент */
+export function lessonSteps(l: Lesson, decks: AiDeck[], reread = false): Step[] {
+  const steps: Step[] = [{ t: 'lesson', topicId: l.topicId, lessonId: l.id, reread }]
+  if (reread) return steps
+  const mod = getModule(l.topicId, decks)
+  if (!mod) return steps
+  steps.push({ t: 'quiz-start', title: l.title })
+  for (const itemId of shuffle(l.itemIds)) {
+    const [first] = mod.kinds(itemId)
+    steps.push({ t: 'review', cardId: `${l.topicId}|${itemId}|${first}`, isNew: true })
+  }
+  return steps
+}
+
+/** Отдельное занятие из одного урока — когда урок открыт из темы */
+export function lessonPlan(l: Lesson, decks: AiDeck[], reread = false): Plan {
+  const steps = lessonSteps(l, decks, reread)
+  return { steps, reviewCount: 0, newCount: reread ? 0 : l.itemIds.length, lessons: [{ topicId: l.topicId, lessonId: l.id, title: l.title }], estMinutes: Math.max(1, Math.round(lessonCost(l) / 60)) }
 }

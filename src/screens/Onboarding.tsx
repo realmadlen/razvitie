@@ -26,7 +26,7 @@ export function Onboarding() {
             <div className="how">
               <div><span className="icon-tile" style={{ background: 'var(--c-sky)' }}><Calculator size={18} /></span><div><b>Задачи по желанию</b><p>Примеры и логика — отдельно, когда захочется. Не получается — разберём решение по шагам.</p></div></div>
               <div><span className="icon-tile" style={{ background: 'var(--accent)' }}><RotateCcw size={18} /></span><div><b>Повторение</b><p>Алгоритм FSRS сам решает, что пора вспомнить: через день, неделю, полгода.</p></div></div>
-              <div><span className="icon-tile" style={{ background: 'var(--c-teal)' }}><Sparkles size={18} /></span><div><b>Новое с ассоциациями</b><p>Небольшая порция по каждой теме и образ, который поможет запомнить.</p></div></div>
+              <div><span className="icon-tile" style={{ background: 'var(--c-teal)' }}><Sparkles size={18} /></span><div><b>Сначала урок</b><p>Новое приходит рассказом с запоминалками, а вопросы — только по тому, что уже пройдено.</p></div></div>
               <div><span className="icon-tile" style={{ background: 'var(--c-amber)' }}><Compass size={18} /></span><div><b>Открытие дня</b><p>Факт из незнакомой области. Понравится — отметьте тему на следующий месяц.</p></div></div>
             </div>
           </>
