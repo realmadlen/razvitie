@@ -20,6 +20,10 @@ export interface Plan {
   newCount: number
   lessons: PlannedLesson[]
   estMinutes: number
+  /** Без остановки: когда шаги кончаются, подбираем следующую порцию */
+  endless?: boolean
+  /** Сколько первых шагов — обязательное занятие на сегодня */
+  dailySteps?: number
 }
 
 const SEC = { review: 11, page: 35, quiz: 12, order: 35, discovery: 20 }
@@ -70,14 +74,8 @@ export async function buildPlan(s: Settings, decks: AiDeck[], opts: { minutes?: 
   }
 
   const revSteps: Step[] = reviews.map((r) => ({ t: 'review', cardId: r.id }))
-  // Повторения — до уроков (разогрев памяти), часть оставляем между уроками
-  const head = lessons.length > 1 ? Math.ceil(revSteps.length * 0.6) : revSteps.length
-  steps.push(...revSteps.slice(0, head))
-  lessons.forEach((l, i) => {
-    steps.push(...lessonSteps(l, decks))
-    if (i === 0) steps.push(...revSteps.slice(head))
-  })
-  if (!lessons.length) steps.push(...revSteps.slice(head))
+  // Сначала новый урок (рассказ → проверка), потом повторение пройденного, между уроками
+  steps.push(...interleave(lessons, revSteps, decks))
 
   // Упорядочивание — одна задача по теме, где уже есть что сравнивать
   if (!opts.extra) {
@@ -93,6 +91,46 @@ export async function buildPlan(s: Settings, decks: AiDeck[], opts: { minutes?: 
 
   const newCount = lessons.reduce((a, l) => a + l.itemIds.filter((id) => !introduced.get(l.topicId)?.has(id)).length, 0)
   return { steps, reviewCount: reviews.length, newCount, lessons: lessons.map((l) => ({ topicId: l.topicId, lessonId: l.id, title: l.title })), estMinutes: Math.max(1, Math.round(used / 60)) }
+}
+
+/** Урок → повторения → урок → оставшиеся повторения */
+function interleave(lessons: Lesson[], revSteps: Step[], decks: AiDeck[]): Step[] {
+  if (!lessons.length) return revSteps
+  const out: Step[] = []
+  const per = Math.ceil(revSteps.length / lessons.length)
+  lessons.forEach((l, i) => {
+    out.push(...lessonSteps(l, decks))
+    out.push(...revSteps.slice(i * per, (i + 1) * per))
+  })
+  return out
+}
+
+/**
+ * Следующая порция для режима «без остановки»: накопившиеся повторения и следующий урок
+ * (темы по кругу). Когда новое кончилось — тренировка самых слабых карточек.
+ */
+export async function buildChunk(s: Settings, decks: AiDeck[], round: number, recent: Set<string>): Promise<Step[]> {
+  const due = (await dueCards()).filter((c) => !recent.has(c.id)).slice(0, 8)
+  const introduced = await introducedByTopic()
+  let topics = monthTopics(s)
+  if (!topics.length) topics = [...introduced.keys()]
+  let lesson: Lesson | undefined
+  for (let i = 0; i < topics.length && !lesson; i++) {
+    const topicId = topics[(round + i) % topics.length]
+    lesson = nextLesson(topicId, decks, introduced.get(topicId) ?? new Set())
+  }
+  const revSteps: Step[] = due.map((r) => ({ t: 'review', cardId: r.id }))
+  const steps = lesson ? interleave([lesson], revSteps, decks) : revSteps
+  if (lesson && round % 2 === 1) {
+    const mod = getModule(lesson.topicId, decks)
+    const task = mod?.order?.([...(introduced.get(lesson.topicId) ?? []), ...lesson.itemIds])
+    if (task) steps.push({ t: 'order', task })
+  }
+  if (steps.length) return steps
+  // Нового нет и ничего не просрочено — закрепляем самое шаткое
+  const all = await db.cards.toArray()
+  const d = new Date()
+  return all.filter((c) => !recent.has(c.id)).sort((a, b) => retrievability(a, d) - retrievability(b, d)).slice(0, 8).map((c) => ({ t: 'review', cardId: c.id }))
 }
 
 export function pickDiscovery(s: Settings, topics: string[]): Discovery | null {

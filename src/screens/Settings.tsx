@@ -116,7 +116,7 @@ export function SettingsScreen() {
         )}
       </section>
 
-      <p className="note" style={{ textAlign: 'center' }}>Развитие · версия 1.0 · интервальное повторение FSRS</p>
+      <p className="note" style={{ textAlign: 'center' }}>Развитие · обновление от {__BUILD__} · интервальное повторение FSRS</p>
     </main>
   )
 }

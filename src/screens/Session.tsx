@@ -6,7 +6,7 @@ import { getModule, checkTyped, topicTitle, type Question, type OrderTask, type 
 import { findLesson } from '../content/lessons'
 import { TOPIC_BY_ID, type Discovery } from '../content/catalog'
 import { review, gradeFrom, newCardRow, memoryIndex } from '../srs'
-import type { Plan, Step } from '../session'
+import { buildChunk, type Plan, type Step } from '../session'
 import { WorldMap } from '../components/WorldMap'
 import { makeMnemonic, AiError } from '../ai'
 
@@ -25,6 +25,12 @@ export function Session({ plan, extra = false, onDone }: Props) {
   const started = useRef(Date.now())
   const requeued = useRef(new Map<string, number>())
   const [, tick] = useState(0)
+  const { settings, decks } = useStore()
+  const endless = !!plan.endless
+  const [loading, setLoading] = useState(false)
+  const round = useRef(0)
+  const seen = useRef(new Set<string>())
+  const dailyDone = useRef(false)
 
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t) }, [])
 
@@ -35,20 +41,45 @@ export function Session({ plan, extra = false, onDone }: Props) {
   const saveTime = async (completed: boolean) => {
     const seconds = Math.min(Math.floor((Date.now() - started.current) / 1000), 60 * 90)
     await bumpDay({ addSeconds: seconds })
-    if (completed && !extra) await bumpDay({ completed: true })
+    if (completed && !extra && !endless) await bumpDay({ completed: true })
     const mi = await memoryIndex()
     if (mi.count) await bumpDay({ retention: mi.value })
     return seconds
   }
 
-  const next = () => {
-    if (idx + 1 >= queue.length) { setFinished(true); return }
+  const next = async () => {
+    // Обязательная часть дня пройдена — засчитываем день, даже если учимся дальше
+    if (endless && !extra && !dailyDone.current && plan.dailySteps !== undefined && idx + 1 >= plan.dailySteps) {
+      dailyDone.current = true
+      await bumpDay({ completed: true })
+    }
+    if (idx + 1 >= queue.length) {
+      if (!endless) { setFinished(true); return }
+      if (!(await loadMore())) return
+    }
     setIdx(idx + 1)
     setPhase('ask')
   }
 
+  const loadMore = async () => {
+    setLoading(true)
+    const more = await buildChunk(settings, decks, round.current++, seen.current).catch(() => [] as Step[])
+    setLoading(false)
+    if (!more.length) { setFinished(true); return false }
+    setQueue((q) => [...q, ...more])
+    return true
+  }
+
+  // Сразу «без остановки» (сегодняшнее уже сделано) — первую порцию подбираем при открытии
+  const kicked = useRef(false)
+  useEffect(() => {
+    if (endless && !plan.steps.length && !kicked.current) { kicked.current = true; loadMore() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const onAnswered = (r: { correct: boolean; cardId?: string; again?: boolean; isNew?: boolean }) => {
     setPhase('answered')
+    if (r.cardId) seen.current.add(r.cardId)
     setStats((s) => ({ ...s, answered: s.answered + 1, correct: s.correct + (r.correct ? 1 : 0) }))
     // Ошибка — карточка вернётся в конце занятия (не больше двух раз)
     if (r.cardId && r.again) {
@@ -66,11 +97,12 @@ export function Session({ plan, extra = false, onDone }: Props) {
   }
 
   const close = async () => {
+    if (endless && stats.answered > 0) { setFinished(true); return }
     const seconds = await saveTime(false)
     onDone({ ...stats, seconds, completed: false, extra })
   }
 
-  if (finished) return <Summary stats={stats} extra={extra} elapsed={elapsed} onClose={async () => { const seconds = await saveTime(true); onDone({ ...stats, seconds, completed: true, extra }) }} />
+  if (finished) return <Summary stats={stats} extra={extra} endless={endless} elapsed={elapsed} onClose={async () => { const seconds = await saveTime(true); onDone({ ...stats, seconds, completed: true, extra }) }} />
 
   const pct = total ? Math.round((idx / total) * 100) : 0
 
@@ -78,10 +110,13 @@ export function Session({ plan, extra = false, onDone }: Props) {
     <div className="session" role="dialog" aria-label="Занятие">
       <div className="session-top">
         <button className="icon-btn" onClick={close} aria-label="Завершить занятие"><X size={20} strokeWidth={2} /></button>
-        <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></div>
+        {endless
+          ? <span className="session-endless num">Без остановки · {stats.answered} {stats.answered % 10 === 1 && stats.answered % 100 !== 11 ? 'ответ' : [2, 3, 4].includes(stats.answered % 10) && ![12, 13, 14].includes(stats.answered % 100) ? 'ответа' : 'ответов'}</span>
+          : <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></div>}
         <span className="session-timer">{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}</span>
       </div>
-      {step && (
+      {loading && <div className="session-body"><p className="note" style={{ textAlign: 'center', marginTop: 80 }}><Loader2 size={18} className="spin" /> Подбираем дальше…</p></div>}
+      {step && !loading && (
         <StepView key={`${idx}-${step.t}`} step={step} phase={phase} onAnswered={onAnswered} onNext={next}
           onNewItem={(n: number) => setStats((s) => ({ ...s, newItems: s.newItems + n }))} />
       )}
@@ -142,7 +177,7 @@ function LessonFact({ intro }: { intro: Intro }) {
 }
 
 export function LessonStep({ topicId, lessonId, reread, onNext, onNewItems }: { topicId: string; lessonId: string; reread?: boolean; onNext: () => void; onNewItems?: (n: number) => void }) {
-  const { decks } = useStore()
+  const { decks, settings } = useStore()
   const lesson = useMemo(() => findLesson(lessonId, topicId, decks), [lessonId, topicId, decks])
   const mod = getModule(topicId, decks)
   const [page, setPage] = useState(0)
@@ -193,6 +228,10 @@ export function LessonStep({ topicId, lessonId, reread, onNext, onNewItems }: { 
             {pg.title && <h2 className="lesson-h">{pg.title}</h2>}
             {pg.itemId && <LessonFact intro={mod.intro(pg.itemId)} />}
             <RichText text={pg.text} />
+            {pg.itemId && (() => {
+              const it = mod.intro(pg.itemId, settings.mnemonics[`${topicId}|${pg.itemId}`])
+              return it.mnemonic ? <MnemonicBox key={pg.itemId} topicId={topicId} itemId={pg.itemId} text={it.mnemonic} fact={`${it.title}: ${it.facts.map((f) => `${f.label} — ${f.value}`).join('; ')}`} /> : null
+            })()}
             {pg.check && (
               <div className="lesson-check">
                 <span className="mnemonic-title"><Brain size={16} /> Вопрос на понимание</span>
@@ -497,7 +536,7 @@ function Missing({ onNext }: { onNext: () => void }) {
 
 // ——— Итог ———
 
-function Summary({ stats, extra, elapsed, onClose }: { stats: { answered: number; correct: number; newItems: number }; extra: boolean; elapsed: number; onClose: () => void }) {
+function Summary({ stats, extra, endless, elapsed, onClose }: { stats: { answered: number; correct: number; newItems: number }; extra: boolean; endless?: boolean; elapsed: number; onClose: () => void }) {
   const acc = stats.answered ? Math.round((stats.correct / stats.answered) * 100) : 0
   const mins = Math.max(1, Math.round(elapsed / 60))
   return (
@@ -506,7 +545,7 @@ function Summary({ stats, extra, elapsed, onClose }: { stats: { answered: number
       <div className="session-body">
         <div className="summary fade-in">
           <span className="summary-icon"><PartyPopper size={34} /></span>
-          <h1>{extra ? 'Ещё немного — готово' : 'Занятие выполнено'}</h1>
+          <h1>{endless ? 'Отличное занятие' : extra ? 'Ещё немного — готово' : 'Занятие выполнено'}</h1>
           <p className="note">Каждое повторение отодвигает забывание. Карточки вернутся ровно тогда, когда начнут забываться.</p>
           <div className="stats">
             <div className="stat"><b className="num">{mins} мин</b><span>занятие</span></div>

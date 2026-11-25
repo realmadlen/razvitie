@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { db, loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings, type AiDeck } from './db'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { migrate } from './migrate'
 
 interface Store {
   ready: boolean
@@ -18,7 +19,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const decks = useLiveQuery(() => db.decks.toArray(), [], [] as AiDeck[])
 
   useEffect(() => {
-    loadSettings().then((s) => { ref.current = s; setSettings(s); setReady(true) }).catch(() => setReady(true))
+    loadSettings()
+      .then(async (s0) => { const s = await migrate(s0).catch(() => s0); if (s !== s0) await saveSettings(s); ref.current = s; setSettings(s); setReady(true) }).catch(() => setReady(true))
   }, [])
 
   const update = useCallback(async (patch: Partial<Settings> | ((s: Settings) => Partial<Settings>)) => {

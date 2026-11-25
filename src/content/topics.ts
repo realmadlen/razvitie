@@ -1,7 +1,8 @@
 // Реестр тем: как каждая тема знакомит с новым и задаёт вопросы.
 import type { CardRow, AiDeck } from '../db'
 import { COUNTRIES, COUNTRY_BY_ID, REGION_NAMES, formatArea } from './countries'
-import { HISTORY, HISTORY_BY_ID, eventYears } from './history'
+import { HISTORY, HISTORY_BY_ID, RULERS, RULER_BY_ID, eventYears, rulerYears } from './history'
+import { SCIENCE_ITEMS } from './science'
 import { BIASES, BIAS_BY_ID } from './biases'
 import { TOPIC_BY_ID } from './catalog'
 
@@ -99,20 +100,50 @@ const countries: TopicModule = {
   },
 }
 
-// ——— История России ———
+// ——— История России: события и правители ———
+
+const isRuler = (id: string) => id.startsWith('r-')
 
 const history: TopicModule = {
   id: 'russia-history',
-  unit: 'событие',
-  itemIds: () => HISTORY.map((e) => e.id),
-  kinds: () => ['year'],
-  itemTitle: (id) => HISTORY_BY_ID.get(id)!.title,
-  itemSub: (id) => { const e = HISTORY_BY_ID.get(id)!; return `${eventYears(e)} · ${e.era}` },
-  intro(id, mn) {
-    const e = HISTORY_BY_ID.get(id)!
-    return { topicId: 'russia-history', itemId: id, title: e.title, subtitle: e.era, facts: [{ label: 'Год', value: eventYears(e) }], body: e.detail, mnemonic: mn ?? e.mnemonic }
+  unit: 'факт',
+  itemIds: () => [...HISTORY.map((e) => e.id), ...RULERS.map((r) => r.id)],
+  kinds: (id) => {
+    if (!isRuler(id)) return ['year']
+    return RULER_BY_ID.get(id)?.prev ? ['deed', 'next'] : ['deed']
   },
-  question(card, mn) {
+  itemTitle: (id) => isRuler(id) ? RULER_BY_ID.get(id)!.short : HISTORY_BY_ID.get(id)!.title,
+  itemSub: (id) => {
+    if (isRuler(id)) { const r = RULER_BY_ID.get(id)!; return `${rulerYears(r)} · ${r.known}` }
+    const e = HISTORY_BY_ID.get(id)!; return `${e.date ? `${e.date} ` : ''}${eventYears(e)} · ${e.era}`
+  },
+  intro(id, mn) {
+    if (isRuler(id)) {
+      const r = RULER_BY_ID.get(id)!
+      const prev = r.prev ? RULER_BY_ID.get(r.prev) : undefined
+      return { topicId: 'russia-history', itemId: id, title: r.name, subtitle: r.title,
+        facts: [{ label: 'У власти', value: rulerYears(r) }, ...(prev ? [{ label: 'После кого', value: prev.short }] : [])],
+        body: r.known, mnemonic: mn ?? r.mnemonic }
+    }
+    const e = HISTORY_BY_ID.get(id)!
+    return { topicId: 'russia-history', itemId: id, title: e.title, subtitle: e.era, facts: [{ label: 'Когда', value: e.date ? `${e.date} ${eventYears(e)}` : eventYears(e) }], body: e.detail, mnemonic: mn ?? e.mnemonic }
+  },
+  question(card, mn, known) {
+    if (isRuler(card.itemId)) {
+      const r = RULER_BY_ID.get(card.itemId)!
+      const learned = RULERS.filter((x) => known?.has(x.id))
+      // Неверные варианты — из изученных правителей, при нехватке — соседи по времени
+      const near = [...RULERS].sort((a, b) => Math.abs(a.from - r.from) - Math.abs(b.from - r.from)).slice(0, 8)
+      const pool = learned.length >= 4 ? learned : [...new Set([...learned, ...near])]
+      const ch = choices(r, pool, 4, (x) => x.id)
+      const base = { topicId: 'russia-history', itemId: r.id, mnemonic: mn ?? r.mnemonic, explain: `${r.name} (${rulerYears(r)}) — ${r.known.charAt(0).toLowerCase()}${r.known.slice(1)}`, label: 'Правители' }
+      if (card.kind === 'next' && r.prev) {
+        const p = RULER_BY_ID.get(r.prev)!
+        const opts = choices(r, pool.filter((x) => x.id !== p.id), 4, (x) => x.id)
+        return { ...base, type: 'choice', prompt: `Кто правил сразу после: ${p.short}?`, options: opts.options.map((x) => x.short), correct: opts.correct }
+      }
+      return { ...base, type: 'choice', prompt: `Кто это? ${r.known}`, options: ch.options.map((x) => x.short), correct: ch.correct }
+    }
     const e = HISTORY_BY_ID.get(card.itemId)!
     const base = { topicId: 'russia-history', itemId: e.id, mnemonic: mn ?? e.mnemonic, explain: `${eventYears(e)} — ${e.title}. ${e.detail}`, label: 'История России' }
     if (recognitionPhase(card)) {
@@ -125,8 +156,14 @@ const history: TopicModule = {
     return { ...base, type: 'typed', prompt: `В каком году: ${e.title}?`, answers: [String(e.year)], display: eventYears(e), inputMode: 'numeric' }
   },
   order(introduced) {
-    if (introduced.length < 4) return null
-    const pickd = shuffle(introduced).slice(0, 4).map((id) => HISTORY_BY_ID.get(id)!)
+    const rulers = introduced.filter(isRuler)
+    const events = introduced.filter((id) => !isRuler(id) && HISTORY_BY_ID.has(id))
+    if (rulers.length >= 4 && (events.length < 4 || Math.random() < 0.5)) {
+      const pickd = shuffle(rulers).slice(0, 4).map((id) => RULER_BY_ID.get(id)!)
+      return { topicId: 'russia-history', prompt: 'Расставьте правителей по порядку, от раннего к позднему', items: shuffle(pickd).map((r) => ({ label: r.short, sub: r.title, key: r.from })) }
+    }
+    if (events.length < 4) return null
+    const pickd = shuffle(events).slice(0, 4).map((id) => HISTORY_BY_ID.get(id)!)
     return { topicId: 'russia-history', prompt: 'Расставьте события по порядку, от раннего к позднему', items: shuffle(pickd).map((e) => ({ label: e.title, sub: e.era, key: e.year })) }
   },
 }
@@ -179,7 +216,9 @@ export function deckModule(deck: AiDeck): TopicModule {
   }
 }
 
-const BUILTIN: Record<string, TopicModule> = { countries, 'russia-history': history, biases }
+const science = deckModule({ topicId: 'science-basics', title: 'Как устроен мир', items: SCIENCE_ITEMS, createdAt: 0 })
+
+const BUILTIN: Record<string, TopicModule> = { countries, 'russia-history': history, biases, 'science-basics': science }
 
 export function getModule(topicId: string, decks: AiDeck[]): TopicModule | null {
   if (BUILTIN[topicId]) return BUILTIN[topicId]

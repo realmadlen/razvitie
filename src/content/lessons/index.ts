@@ -1,7 +1,10 @@
 // Уроки по темам. Для готовых тем — написанные рассказы, для тем от ИИ — собранные из карточек.
 import type { AiDeck } from '../../db'
 import type { Lesson } from './types'
-import { HISTORY_LESSONS } from './history'
+import { HISTORY_LESSONS_A } from './history-a'
+import { HISTORY_LESSONS_B } from './history-b'
+import { HISTORY_LESSONS_C } from './history-c'
+import { SCIENCE_LESSONS } from './science'
 import { BIAS_LESSONS } from './biases'
 import { COUNTRY_LESSONS_A } from './countries-a'
 import { COUNTRY_LESSONS_B } from './countries-b'
@@ -10,7 +13,8 @@ export type { Lesson, LessonPage } from './types'
 
 const BUILTIN: Record<string, Lesson[]> = {
   countries: [...COUNTRY_LESSONS_A, ...COUNTRY_LESSONS_B],
-  'russia-history': HISTORY_LESSONS,
+  'russia-history': [...HISTORY_LESSONS_A, ...HISTORY_LESSONS_B, ...HISTORY_LESSONS_C],
+  'science-basics': SCIENCE_LESSONS,
   biases: BIAS_LESSONS,
 }
 
@@ -27,7 +31,7 @@ function deckLessons(deck: AiDeck): Lesson[] {
       pages: items.map((it) => ({
         itemId: it.id,
         title: it.q,
-        text: [`**${it.a}**`, it.explain, it.mnemonic && `Запоминалка: ${it.mnemonic}`].filter(Boolean).join('\n\n'),
+        text: [`**${it.a}**`, it.explain].filter(Boolean).join('\n\n'),
       })),
     })
   }

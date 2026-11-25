@@ -15,11 +15,11 @@ export interface CatalogTopic {
 
 export const CATALOG: CatalogTopic[] = [
   { id: 'countries', title: 'Страны и столицы', area: 'География', description: '100 крупнейших стран мира по площади: столица, место на карте, ассоциации.', builtin: true, color: 'var(--c-teal)' },
-  { id: 'russia-history', title: 'История России', area: 'История', description: '39 ключевых событий от призвания варягов до Конституции 1993 года.', builtin: true, color: 'var(--c-amber)' },
+  { id: 'russia-history', title: 'История России', area: 'История', description: 'Главные события и правители — кто за кем был: от Рюрика до наших дней, с Первой мировой и Великой Отечественной.', builtin: true, color: 'var(--c-amber)' },
   { id: 'biases', title: 'Когнитивные искажения', area: 'Психология', description: '30 ловушек мышления с примерами из жизни и способами себя проверить.', builtin: true, color: 'var(--c-violet)' },
   { id: 'world-history', title: 'Всемирная история', area: 'История', description: 'Цивилизации, империи, войны и революции, изменившие мир.', builtin: false, color: 'var(--c-rose)' },
   { id: 'geo-nature', title: 'Реки, горы и океаны', area: 'География', description: 'Самые длинные реки, высочайшие вершины, моря и пустыни.', builtin: false, color: 'var(--c-sky)' },
-  { id: 'science-basics', title: 'Как устроен мир', area: 'Наука', description: 'Главные открытия физики, химии и биологии простыми словами.', builtin: false, color: 'var(--c-green)' },
+  { id: 'science-basics', title: 'Как устроен мир', area: 'Наука', description: 'Почему небо голубое, откуда времена года, как работают вакцины — наука простыми словами.', builtin: true, color: 'var(--c-green)' },
   { id: 'space', title: 'Космос', area: 'Наука', description: 'Планеты, звёзды, расстояния и история освоения космоса.', builtin: false, color: 'var(--c-indigo)' },
   { id: 'human-body', title: 'Тело человека', area: 'Наука', description: 'Органы, системы, как работают мозг и память.', builtin: false, color: 'var(--c-rose)' },
   { id: 'ru-literature', title: 'Русская литература', area: 'Литература', description: 'Авторы, произведения, герои и цитаты от Пушкина до XX века.', builtin: false, color: 'var(--c-amber)' },

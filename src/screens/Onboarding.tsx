@@ -8,7 +8,7 @@ export function Onboarding() {
   const { update } = useStore()
   const [step, setStep] = useState(0)
   const [minutes, setMinutes] = useState<15 | 30>(15)
-  const [topics, setTopics] = useState<string[]>(['countries', 'russia-history', 'biases'])
+  const [topics, setTopics] = useState<string[]>(['countries', 'russia-history', 'science-basics'])
   const ready = CATALOG.filter((t) => t.builtin)
 
   const finish = async () => {

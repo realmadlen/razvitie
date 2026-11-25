@@ -8,7 +8,10 @@ const single = !!process.env.SINGLEFILE
 
 export default defineConfig({
   base: process.env.BASE_PATH ?? './',
-  define: single ? { 'import.meta.env.VITE_SINGLEFILE': '"1"' } : {},
+  define: {
+    __BUILD__: JSON.stringify(new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Almaty', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })),
+    ...(single ? { 'import.meta.env.VITE_SINGLEFILE': '"1"' } : {}),
+  },
   build: single ? { outDir: 'dist-single' } : {},
   plugins: [
     react(),

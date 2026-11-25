@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Play, Check, RotateCcw, BookOpen, CalendarRange, ChevronRight, Plus } from 'lucide-react'
+import { Play, Check, RotateCcw, BookOpen, CalendarRange, ChevronRight, Infinity as Endless } from 'lucide-react'
 import { db, dayKey, addDays } from '../db'
 import { useStore } from '../store'
 import { buildPlan, monthTopics, type Plan } from '../session'
@@ -83,9 +83,14 @@ export function Today({ onStart, onPickMonth, onOpenTopic, refreshKey }: Props) 
               {plan.lessons.map((l) => <li key={l.lessonId}><span>{topicTitle(l.topicId, decks)}</span>{l.title}</li>)}
             </ul>
           )}
-          <button className="btn btn-block" disabled={!plan} onClick={() => plan && onStart(plan, false)}>
-            <Play size={18} fill="currentColor" /> {todayRow && todayRow.answered > 0 ? 'Продолжить' : 'Начать'}
-          </button>
+          <div className="today-actions">
+            <button className="btn btn-block" disabled={!plan} onClick={() => plan && onStart(plan, false)}>
+              <Play size={18} fill="currentColor" /> {todayRow && todayRow.answered > 0 ? 'Продолжить' : 'Начать'}
+            </button>
+            <button className="btn btn-block btn-ghost" disabled={!plan} onClick={() => plan && onStart({ ...plan, endless: true, dailySteps: plan.steps.length }, false)}>
+              <Endless size={18} /> Учиться без остановки
+            </button>
+          </div>
         </section>
       ) : (
         <section className="today-panel is-done" aria-label="Занятие выполнено">
@@ -96,9 +101,10 @@ export function Today({ onStart, onPickMonth, onOpenTopic, refreshKey }: Props) 
               <p className="num" style={{ color: 'var(--muted)', opacity: 1 }}>{Math.round((todayRow?.seconds ?? 0) / 60)} мин · {todayRow?.answered ?? 0} {plural(todayRow?.answered ?? 0, 'ответ', 'ответа', 'ответов')} · {todayRow?.newItems ?? 0} {plural(todayRow?.newItems ?? 0, 'новый', 'новых', 'новых')}</p>
             </div>
           </div>
-          <button className="btn btn-block" onClick={async () => onStart(await buildPlan(settings, decks, { minutes: 5, extra: true }), true)}>
-            <Plus size={18} /> Ещё 5 минут
+          <button className="btn btn-block" onClick={() => onStart({ steps: [], reviewCount: 0, newCount: 0, lessons: [], estMinutes: 0, endless: true }, true)}>
+            <Endless size={18} /> Продолжить обучение
           </button>
+          <p className="note" style={{ margin: 0 }}>Уроки и повторения будут идти друг за другом, пока вы сами не остановитесь.</p>
         </section>
       )}
 
