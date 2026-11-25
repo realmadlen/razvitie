@@ -7,4 +7,4 @@ npm install
 npm run dev
 ```
 
-Деплой на GitHub Pages — автоматически при пуше в `main`.
+Сайт: https://realmadlen.github.io/razvitie/ — собранная `dist` публикуется в ветку `gh-pages`.
