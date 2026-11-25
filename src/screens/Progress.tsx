@@ -134,7 +134,7 @@ export function Progress() {
       <section className="chart-card">
         <div className="chart-head"><h3>Точность ответов</h3><span>{mAns ? `${Math.round((mCor / mAns) * 100)}% за месяц` : 'нет данных'}</span></div>
         <Bars values={last14.map((d) => { const r = byDay.get(d); return r && r.answered ? Math.round((r.correct / r.answered) * 100) : 0 })} labels={last14.map(short)} unit="%" color="var(--good)" />
-        <div className="legend"><span>Разминка: {wTot ? `${Math.round((wCor / wTot) * 100)}% верно из ${wTot}` : 'ещё не было'}</span><span>Новых фактов: {mNew}</span></div>
+        <div className="legend"><span>Задачи: {wTot ? `${Math.round((wCor / wTot) * 100)}% верно из ${wTot}` : 'ещё не было'}</span><span>Новых фактов: {mNew}</span></div>
       </section>
 
       <section className="chart-card">

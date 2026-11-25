@@ -1,12 +1,10 @@
-// Сборка ежедневного занятия: разминка → повторение → новое → упорядочивание → открытие дня.
+// Сборка ежедневного занятия: повторение → новое → упорядочивание → открытие дня.
 import { db, monthKey, type CardRow, type Settings, type AiDeck } from './db'
 import { getModule, type OrderTask } from './content/topics'
-import { makeWarmup, type WarmupTask } from './content/warmup'
 import { DISCOVERIES, type Discovery } from './content/catalog'
 import { retrievability } from './srs'
 
 export type Step =
-  | { t: 'warmup'; task: WarmupTask }
   | { t: 'review'; cardId: string; isNew?: boolean }
   | { t: 'intro'; topicId: string; itemId: string }
   | { t: 'order'; task: OrderTask }
@@ -19,7 +17,7 @@ export interface Plan {
   estMinutes: number
 }
 
-const SEC = { warmup: 25, review: 11, intro: 25, order: 35, discovery: 20 }
+const SEC = { review: 11, intro: 25, order: 35, discovery: 20 }
 
 const shuffle = <T,>(xs: T[]): T[] => [...xs].sort(() => Math.random() - 0.5)
 
@@ -45,11 +43,6 @@ export async function buildPlan(s: Settings, decks: AiDeck[], opts: { minutes?: 
   const budget = minutes * 60
   const steps: Step[] = []
   let used = 0
-
-  if (!opts.extra) {
-    for (const task of makeWarmup(3)) steps.push({ t: 'warmup', task })
-    used += SEC.warmup * 3
-  }
 
   const due = await dueCards()
   const reviewCap = Math.max(5, Math.floor((budget * 0.55) / SEC.review))

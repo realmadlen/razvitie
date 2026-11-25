@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X, Check, Lightbulb, Sparkles, ArrowUp, ArrowDown, MapPin, Brain, Calculator, Compass, Heart, Loader2, PartyPopper, Pencil } from 'lucide-react'
+import { X, Check, Lightbulb, Sparkles, ArrowUp, ArrowDown, MapPin, Brain, Compass, Heart, Loader2, PartyPopper, Pencil } from 'lucide-react'
 import { db, bumpDay, type CardRow } from '../db'
 import { useStore } from '../store'
 import { getModule, checkTyped, type Question, type OrderTask, type Intro } from '../content/topics'
-import type { WarmupTask } from '../content/warmup'
 import { TOPIC_BY_ID, type Discovery } from '../content/catalog'
 import { review, gradeFrom, newCardRow, memoryIndex } from '../srs'
 import type { Plan, Step } from '../session'
@@ -95,7 +94,6 @@ interface StepProps { step: Step; phase: Phase; onAnswered: (r: { correct: boole
 
 function StepView({ step, phase, onAnswered, onNext, onNewItem }: StepProps) {
   switch (step.t) {
-    case 'warmup': return <WarmupStep task={step.task} phase={phase} onAnswered={onAnswered} onNext={onNext} />
     case 'intro': return <IntroStep topicId={step.topicId} itemId={step.itemId} onNext={onNext} onNewItem={onNewItem} />
     case 'review': return <ReviewStep cardId={step.cardId} phase={phase} onAnswered={onAnswered} onNext={onNext} />
     case 'order': return <OrderStep task={step.task} phase={phase} onAnswered={onAnswered} onNext={onNext} />
@@ -111,79 +109,6 @@ function NextButton({ onNext, label = 'Далее' }: { onNext: () => void; labe
   const ref = useRef<HTMLButtonElement>(null)
   useEffect(() => { ref.current?.focus() }, [])
   return <button ref={ref} className="btn btn-primary btn-block" onClick={onNext}>{label}</button>
-}
-
-// ——— Разминка ———
-
-function WarmupStep({ task, phase, onAnswered, onNext }: { task: WarmupTask; phase: Phase; onAnswered: StepProps['onAnswered']; onNext: () => void }) {
-  const two = task.kind === 'quadratic'
-  const [a, setA] = useState('')
-  const [b, setB] = useState('')
-  const [hint, setHint] = useState(false)
-  const [ok, setOk] = useState<boolean | null>(null)
-  const [chosen, setChosen] = useState<number | null>(null)
-
-  const finish = async (correct: boolean) => {
-    setOk(correct)
-    onAnswered({ correct })
-    await bumpDay({ warmupTotal: 1, warmupCorrect: correct ? 1 : 0 })
-  }
-
-  const check = () => {
-    const parse = (s: string) => Number(s.replace(',', '.').replace('−', '-').trim())
-    const ans = task.answers ?? []
-    if (two) {
-      const got = [parse(a), parse(b)].sort((x, y) => x - y), exp = [...ans].sort((x, y) => x - y)
-      finish(got[0] === exp[0] && got[1] === exp[1])
-    } else finish(parse(a) === ans[0])
-  }
-
-  const isLogicChoice = !!task.choices
-  const Icon = task.kind === 'sequence' || task.kind === 'syllogism' ? Brain : Calculator
-
-  return (
-    <>
-      <div className="session-body fade-in">
-        <span className="q-label"><Icon size={16} /> Разминка · {task.label}</span>
-        {isLogicChoice ? <p className="q-prompt is-long">{task.prompt}</p> : <p className="q-big">{task.prompt}</p>}
-        {isLogicChoice ? (
-          <div className="options">
-            {task.choices!.map((c, i) => {
-              const cls = phase === 'answered' ? (i === task.correctChoice ? 'is-correct' : i === chosen ? 'is-wrong' : 'is-dim') : ''
-              return <button key={c} className={`option ${cls}`} disabled={phase === 'answered'} onClick={() => { setChosen(i); finish(i === task.correctChoice) }}>{c}{phase === 'answered' && i === task.correctChoice && <Check size={20} />}</button>
-            })}
-          </div>
-        ) : (
-          <form className="options" onSubmit={(e) => { e.preventDefault(); if (phase === 'ask' && a.trim() && (!two || b.trim())) check() }}>
-            <input className={`field num ${ok === true ? 'is-correct' : ok === false ? 'is-wrong' : ''}`} id="warm-a" inputMode="text" autoComplete="off" autoFocus
-              placeholder={two ? 'Первый корень' : 'Ответ'} value={a} onChange={(e) => setA(e.target.value)} disabled={phase === 'answered'} />
-            {two && <input className={`field num ${ok === true ? 'is-correct' : ok === false ? 'is-wrong' : ''}`} id="warm-b" inputMode="text" autoComplete="off"
-              placeholder="Второй корень" value={b} onChange={(e) => setB(e.target.value)} disabled={phase === 'answered'} />}
-            <button type="submit" hidden />
-          </form>
-        )}
-        {hint && phase === 'ask' && task.hint && <div className="mnemonic"><span className="mnemonic-title"><Lightbulb size={16} /> Подсказка</span><p>{task.hint}</p></div>}
-        {phase === 'answered' && (
-          <div className={`feedback ${ok ? 'is-good' : 'is-bad'}`}>
-            <span className="feedback-title">{ok ? <><Check size={18} /> Верно</> : 'Не совсем'}</span>
-            <p>{task.explain}</p>
-          </div>
-        )}
-      </div>
-      <Foot>
-        {phase === 'ask' && !isLogicChoice && (
-          <>
-            <button className="btn btn-primary btn-block" disabled={!a.trim() || (two && !b.trim())} onClick={check}>Проверить</button>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              {task.hint ? <button className="btn btn-plain" onClick={() => setHint(true)}><Lightbulb size={18} /> Подсказка</button> : <span />}
-              <button className="btn btn-plain" onClick={() => finish(false)}>Не знаю</button>
-            </div>
-          </>
-        )}
-        {phase === 'answered' && <NextButton onNext={onNext} />}
-      </Foot>
-    </>
-  )
 }
 
 // ——— Знакомство с новым ———

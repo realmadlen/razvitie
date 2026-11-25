@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Play, Check, Clock, RotateCcw, Sparkles, CalendarRange, ChevronRight, Plus } from 'lucide-react'
+import { Play, Check, RotateCcw, Sparkles, CalendarRange, ChevronRight, Plus } from 'lucide-react'
 import { db, dayKey, addDays } from '../db'
 import { useStore } from '../store'
 import { buildPlan, monthTopics, type Plan } from '../session'
@@ -74,7 +74,6 @@ export function Today({ onStart, onPickMonth, onOpenTopic, refreshKey }: Props) 
           </div>
           {plan && (
             <div className="today-breakdown">
-              <span><Clock size={16} /> Разминка</span>
               <span className="num"><RotateCcw size={16} /> {plan.reviewCount} {plural(plan.reviewCount, 'повторение', 'повторения', 'повторений')}</span>
               <span className="num"><Sparkles size={16} /> {plan.newCount} {plural(plan.newCount, 'новый факт', 'новых факта', 'новых фактов')}</span>
             </div>

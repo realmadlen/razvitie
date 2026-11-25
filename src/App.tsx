@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { House, BookOpen, ChartColumn, Settings as Cog } from 'lucide-react'
+import { House, BookOpen, Calculator, ChartColumn, Settings as Cog } from 'lucide-react'
 import { StoreProvider, useStore } from './store'
 import { Today } from './screens/Today'
 import { Topics, TopicSheet, MonthPicker } from './screens/Topics'
@@ -7,13 +7,15 @@ import { Progress } from './screens/Progress'
 import { SettingsScreen } from './screens/Settings'
 import { Onboarding } from './screens/Onboarding'
 import { Session } from './screens/Session'
+import { Practice, PracticeRun, type PracticeMode } from './screens/Practice'
 import type { Plan } from './session'
 
-type Tab = 'today' | 'topics' | 'progress' | 'settings'
+type Tab = 'today' | 'topics' | 'practice' | 'progress' | 'settings'
 
 const TABS: { id: Tab; label: string; Icon: typeof House }[] = [
   { id: 'today', label: 'Сегодня', Icon: House },
   { id: 'topics', label: 'Темы', Icon: BookOpen },
+  { id: 'practice', label: 'Задачи', Icon: Calculator },
   { id: 'progress', label: 'Прогресс', Icon: ChartColumn },
   { id: 'settings', label: 'Настройки', Icon: Cog },
 ]
@@ -25,6 +27,7 @@ function Shell() {
   const [topic, setTopic] = useState<string | null>(null)
   const [picker, setPicker] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [practice, setPractice] = useState<PracticeMode | null>(null)
 
   if (!ready) return null
   if (!settings.onboarded) return <Onboarding />
@@ -33,6 +36,7 @@ function Shell() {
     <div className="app">
       {tab === 'today' && <Today refreshKey={refresh} onStart={(plan, extra) => setSession({ plan, extra })} onPickMonth={() => setPicker(true)} onOpenTopic={setTopic} />}
       {tab === 'topics' && <Topics onOpenTopic={setTopic} onPickMonth={() => setPicker(true)} />}
+      {tab === 'practice' && <Practice onStart={setPractice} />}
       {tab === 'progress' && <Progress />}
       {tab === 'settings' && <SettingsScreen />}
 
@@ -49,6 +53,7 @@ function Shell() {
 
       {topic && <TopicSheet id={topic} onClose={() => { setTopic(null); setRefresh((n) => n + 1) }} />}
       {picker && <MonthPicker onClose={() => { setPicker(false); setRefresh((n) => n + 1) }} />}
+      {practice && <PracticeRun mode={practice} onClose={() => setPractice(null)} />}
       {session && <Session plan={session.plan} extra={session.extra} onDone={() => { setSession(null); setRefresh((n) => n + 1) }} />}
     </div>
   )
